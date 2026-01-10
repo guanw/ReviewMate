@@ -1,2 +1,6 @@
 node_modules/**
+chroma_db/**
+reviews.db
 **/.DS_Store
+.env
+venv/**
