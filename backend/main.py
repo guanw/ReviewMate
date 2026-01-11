@@ -17,8 +17,8 @@ from backend.agents import run_agent_workflow
 # Load environment variables
 load_dotenv()
 
-# ChromaDB setup (using default local embeddings - all-MiniLM-L6-v2, free)
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
+# ChromaDB setup (in-memory for cloud deployment like Render)
+chroma_client = chromadb.Client()
 collection = chroma_client.get_or_create_collection(name="code_reviews")
 
 # Retrieval setup for knowledge base

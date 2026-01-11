@@ -1,10 +1,10 @@
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
-from chromadb import PersistentClient
+import chromadb
 
-# ChromaDB setup for knowledge base
-chroma_client = PersistentClient(path="./chroma_db")
+# ChromaDB setup for knowledge base (in-memory)
+chroma_client = chromadb.Client()
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 vectorstore = Chroma(
     client=chroma_client,
