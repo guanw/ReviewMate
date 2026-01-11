@@ -4,3 +4,4 @@ reviews.db
 **/.DS_Store
 .env
 venv/**
+backend/__pycache__/**

@@ -70,7 +70,7 @@ async def analyze_diff(request: AnalyzeDiffRequest):
         raise HTTPException(status_code=400, detail="Diff content cannot be empty")
 
     # Store in ChromaDB
-    diff_id = f"diff_{hash(request.diff)}"
+    diff_id = f"diff_{hash(request.diff)}_{int(time.time())}"  # Make unique with timestamp
     try:
         collection.add(
             documents=[request.diff],
@@ -80,14 +80,20 @@ async def analyze_diff(request: AnalyzeDiffRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to store in vector DB: {str(e)}")
 
-    # Store metadata in SQLite
+    # Store metadata in SQLite with retry for lock
     try:
-        conn = sqlite3.connect("reviews.db")
+        conn = sqlite3.connect("reviews.db", timeout=10)  # Add timeout
         cursor = conn.cursor()
         cursor.execute("INSERT INTO reviews (id, pr_url, status, timestamp) VALUES (?, ?, ?, ?)",
                        (diff_id, request.pr_url or "", "analyzed", time.time()))
         conn.commit()
         conn.close()
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e).lower():
+            # Log and continue without failing
+            print(f"Database locked, skipping metadata storage: {e}")
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to store metadata: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to store metadata: {str(e)}")
 
