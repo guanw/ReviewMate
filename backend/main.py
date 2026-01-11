@@ -1,9 +1,11 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import os
 import time
 import sqlite3
+from functools import lru_cache
 from dotenv import load_dotenv
 import chromadb
 from chromadb.utils import embedding_functions
@@ -17,18 +19,53 @@ from backend.agents import run_agent_workflow
 # Load environment variables
 load_dotenv()
 
-# ChromaDB setup (in-memory for cloud deployment like Render)
-chroma_client = chromadb.Client()
+app = FastAPI(title="ReviewMate AI Backend", version="1.0.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ChromaDB setup (using default local embeddings - all-MiniLM-L6-v2, free)
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="code_reviews")
 
 # Retrieval setup for knowledge base
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 knowledge_vectorstore = Chroma(
     client=chroma_client,
     collection_name="knowledge_base",
     embedding_function=embeddings,
+)
+retriever = knowledge_vectorstore.as_retriever(search_kwargs={"k": 3})
+
+# Groq LLM setup
+groq_api_key = os.getenv("GROQ_API_KEY")
+if not groq_api_key:
+    raise RuntimeError("GROQ_API_KEY not set in environment")
+llm = ChatGroq(model="llama-3.1-8b-instant", api_key=groq_api_key)
+
+# RAG prompt and chain
+prompt = ChatPromptTemplate.from_template("""
+You are a code review assistant. Based on the following context about coding best practices:
+
+{context}
+
+Analyze this code diff and provide constructive feedback, suggestions for improvement, and any violations of best practices:
+
+Diff: {diff}
+
+Keep your response concise and actionable.
+""")
+
+rag_chain = (
+    {"context": retriever, "diff": RunnablePassthrough()}
+    | prompt
+    | llm
 )
 # For future feedback loop, store agent outputs
 
@@ -48,8 +85,6 @@ def init_db():
     conn.close()
 
 init_db()
-
-app = FastAPI(title="ReviewMate AI Backend", version="1.0.0")
 
 # Pydantic models
 class AnalyzeDiffRequest(BaseModel):
@@ -118,6 +153,26 @@ async def analyze_diff(request: AnalyzeDiffRequest):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+@app.post("/feedback")
+async def submit_feedback(feedback: dict):
+    """Accept feedback for model improvement"""
+    # Simple logging; in production, store and use for fine-tuning
+    print(f"Feedback received: {feedback}")
+    return {"message": "Feedback submitted"}
+
+@app.get("/metrics")
+async def get_metrics():
+    """Get basic metrics on reviews"""
+    try:
+        conn = sqlite3.connect("reviews.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM reviews")
+        count = cursor.fetchone()[0]
+        conn.close()
+        return {"total_reviews": count}
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
